@@ -1,0 +1,93 @@
+#include <WiFiNINA.h>
+
+// WiFi 연결 정보
+const char* ssid = " "; // WiFi SSID
+const char* password = " "; // WiFi 비밀번호
+const char* server = " "; // 서버 IP 주소
+const int port = 8080; // 서버 포트
+
+const int mq7Pin0 = A0; // MQ-7 센서가 A0 핀에 연결
+const int mq7Pin1 = A1; // MQ-7 센서가 A1 핀에 연결
+const int mq7Pin2 = A2; // MQ-7 센서가 A2 핀에 연결
+const int mq7Pin3 = A3; // MQ-7 센서가 A3 핀에 연결
+const int soundSensorPin = A4; // 소리 센서가 A4 핀에 연결
+
+const char* room = "room1/2"; // 방 식별자
+
+const unsigned long sendInterval = 5000; // 5초마다 데이터 전송
+unsigned long lastSendTime = 0;
+
+WiFiClient client;
+
+void setup() {
+  Serial.begin(9600);
+
+  // WiFi 연결 초기화
+  while (WiFi.begin(ssid, password) != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+  Serial.println("Connected to WiFi");
+
+  // 센서 핀 모드 설정
+  pinMode(mq7Pin0, INPUT);
+  pinMode(mq7Pin1, INPUT);
+  pinMode(mq7Pin2, INPUT);
+  pinMode(mq7Pin3, INPUT);
+  pinMode(soundSensorPin, INPUT);
+}
+
+void loop() {
+  unsigned long currentMillis = millis();
+
+  // 5초마다 데이터 전송
+  if (currentMillis - lastSendTime >= sendInterval) {
+    lastSendTime = currentMillis;
+
+    int mq7Value0 = analogRead(mq7Pin0);
+    int mq7Value1 = analogRead(mq7Pin1);
+    int mq7Value2 = analogRead(mq7Pin2);
+    int mq7Value3 = analogRead(mq7Pin3);
+    int soundValue = analogRead(soundSensorPin);
+
+    Serial.print("MQ-7 Sensor Values: ");
+    Serial.println(mq7Value0);
+    Serial.println(mq7Value1);
+    Serial.println(mq7Value2);
+    Serial.println(mq7Value3);
+    Serial.print("Sound Sensor Value: ");
+    Serial.println(soundValue);
+
+    // 서버에 연결
+    if (client.connect(server, port)) {
+      Serial.println("Connected to server");
+
+      // 전송할 데이터 준비
+      String data = "GET /update?room=" + String(room) +
+                    "&value0=" + String(mq7Value0) +
+                    "&value1=" + String(mq7Value1) +
+                    "&value2=" + String(mq7Value2) +
+                    "&value3=" + String(mq7Value3) +
+                    "&sound=" + String(soundValue) +
+                    " HTTP/1.1\r\nHost: " + String(server) + "\r\nConnection: close\r\n\r\n";
+
+      // 데이터 전송
+      client.print(data);
+      Serial.println("Data sent to server");
+
+      // 서버 응답 대기 및 연결 종료
+      while (client.connected()) {
+        if (client.available()) {
+          String line = client.readStringUntil('\r');
+          Serial.print(line);
+        }
+      }
+
+      // 연결 종료
+      client.stop();
+      Serial.println("Disconnected from server");
+    } else {
+      Serial.println("Failed to connect to server");
+    }
+  }
+}
