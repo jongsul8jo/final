@@ -36,7 +36,7 @@
                         table = document.getElementById('room2').getElementsByTagName('tbody')[0];
                     }
 
-                    if (data.timestamp === null) {
+                    if (!data.timestamp) {
                         return;
                     }
 
@@ -52,7 +52,7 @@
                                         <td>${data.value1}</td>
                                         <td>${data.value2}</td>
                                         <td>${data.value3}</td>
-                                        <td>${data.sound}</td>`;  // 소리 센서 데이터 추가
+                                        <td>${data.leq.toFixed(2)}</td>`;  // Leq 값 추가
                 })
                 .catch(error => console.error('Error fetching data:', error));
         }
@@ -84,6 +84,7 @@
             <p>Sensor Value 1: <span id="median_value1_room1">{{ median_values.room1.median_value1 }}</span></p>
             <p>Sensor Value 2: <span id="median_value2_room1">{{ median_values.room1.median_value2 }}</span></p>
             <p>Sensor Value 3: <span id="median_value3_room1">{{ median_values.room1.median_value3 }}</span></p>
+            <p>Leq: <span id="median_leq_room1">{{ median_values.room1.median_leq }}</span></p>
 
             <table id="room1">
                 <thead>
@@ -93,7 +94,7 @@
                         <th>Sensor Value 1</th>
                         <th>Sensor Value 2</th>
                         <th>Sensor Value 3</th>
-                        <th>Sound Sensor</th> <!-- 소리 센서 열 추가 -->
+                        <th>Leq</th> <!-- Leq 열 추가 -->
                     </tr>
                 </thead>
                 <tbody>
@@ -104,7 +105,7 @@
                         <td>{{ entry.value1 }}</td>
                         <td>{{ entry.value2 }}</td>
                         <td>{{ entry.value3 }}</td>
-                        <td>{{ entry.sound }}</td> <!-- 소리 센서 데이터 추가 -->
+                        <td>{{ entry.leq }}</td> <!-- Leq 값 추가 -->
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -117,6 +118,7 @@
             <p>Sensor Value 1: <span id="median_value1_room2">{{ median_values.room2.median_value1 }}</span></p>
             <p>Sensor Value 2: <span id="median_value2_room2">{{ median_values.room2.median_value2 }}</span></p>
             <p>Sensor Value 3: <span id="median_value3_room2">{{ median_values.room2.median_value3 }}</span></p>
+            <p>Leq: <span id="median_leq_room2">{{ median_values.room2.median_leq }}</span></p>
 
             <table id="room2">
                 <thead>
@@ -126,7 +128,7 @@
                         <th>Sensor Value 1</th>
                         <th>Sensor Value 2</th>
                         <th>Sensor Value 3</th>
-                        <th>Sound Sensor</th> <!-- 소리 센서 열 추가 -->
+                        <th>Leq</th> <!-- Leq 열 추가 -->
                     </tr>
                 </thead>
                 <tbody>
@@ -137,7 +139,7 @@
                         <td>{{ entry.value1 }}</td>
                         <td>{{ entry.value2 }}</td>
                         <td>{{ entry.value3 }}</td>
-                        <td>{{ entry.sound }}</td> <!-- 소리 센서 데이터 추가 -->
+                        <td>{{ entry.leq }}</td> <!-- Leq 값 추가 -->
                     </tr>
                     {% endfor %}
                 </tbody>
