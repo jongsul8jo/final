@@ -1,0 +1,306 @@
+from flask import Flask, request, jsonify, render_template
+from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime, timedelta
+import os
+import numpy as np
+
+app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///sensor_data.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
+
+class SensorData(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.String(20))
+    room = db.Column(db.String(20))
+    value0 = db.Column(db.Integer)
+    value1 = db.Column(db.Integer)
+    value2 = db.Column(db.Integer)
+    value3 = db.Column(db.Integer)
+    sound = db.Column(db.Integer)  # 소리 센서의 원시 아날로그 값 저장
+
+# 기존 데이터베이스 파일 삭제
+if os.path.exists('sensor_data.db'):
+    os.remove('sensor_data.db')
+
+# 애플리케이션 컨텍스트에서 데이터베이스 테이블 다시 생성
+with app.app_context():
+    db.create_all()
+
+def analog_to_pressure(analog_value, max_analog=1023, reference_voltage=5.0):
+    """
+    아날로그 값을 압력 값으로 변환
+    :param analog_value: 아날로그 값 (0에서 1023 사이)
+    :param max_analog: 아날로그 값의 최대값 (기본값 1023)
+    :param reference_voltage: 기준 전압 (기본값 5V)
+    :return: 압력 값 (Pa)
+    """
+    return (analog_value / max_analog) * reference_voltage
+
+def calculate_leq(sound_values, reference_pressure=20e-6):
+    """
+    등가 소음 레벨 (Leq) 계산
+    :param sound_values: 아날로그 값 리스트
+    :param reference_pressure: 기준 음압 (기본값 20 마이크로 파스칼)
+    :return: 등가 소음 레벨 (데시벨)
+    """
+    pressures = [analog_to_pressure(value) for value in sound_values]
+    sound_pressure_squared = np.mean([p**2 for p in pressures])
+    leq = 10 * np.log10(sound_pressure_squared / (reference_pressure**2))
+    return leq
+
+@app.route('/update', methods=['GET'])
+def update():
+    """
+    센서 데이터를 업데이트합니다.
+    URL 파라미터로 방 이름과 각 센서 값을 받아 데이터베이스에 저장합니다.
+    """
+    try:
+        room = request.args.get('room')
+        value0 = request.args.get('value0')
+        value1 = request.args.get('value1')
+        value2 = request.args.get('value2')
+        value3 = request.args.get('value3')
+        sound = request.args.get('sound')
+
+        if room and value0 is not None and value1 is not None and value2 is not None and value3 is not None and sound is not None:
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            new_data = SensorData(
+                timestamp=timestamp,
+                room=room,
+                value0=int(value0),
+                value1=int(value1),
+                value2=int(value2),
+                value3=int(value3),
+                sound=int(sound)
+            )
+            db.session.add(new_data)
+            db.session.commit()
+            return "Sensor data received", 200
+        else:
+            return "Invalid data", 400
+    except Exception as e:
+        return str(e), 500
+
+@app.route('/')
+def index():
+    """
+    메인 페이지를 렌더링합니다.
+    각 방의 센서 데이터를 테이블 형태로 표시하고, 최근 5분간의 중간값을 계산하여 보여줍니다.
+    """
+    try:
+        sensor_data = SensorData.query.order_by(SensorData.timestamp.desc()).all()
+
+        period_duration = 5 * 60
+        now = datetime.now()
+        period_start = now - timedelta(seconds=period_duration)
+
+        recent_data = SensorData.query.filter(SensorData.timestamp >= period_start.strftime('%Y-%m-%d %H:%M:%S')).all()
+
+        room_data = {'room1': [], 'room2': []}
+        for data in recent_data:
+            if data.room == 'room1':
+                room_data['room1'].append(data)
+            elif data.room == 'room2':
+                room_data['room2'].append(data)
+
+        median_values = {}
+        for room, values in room_data.items():
+            if values:
+                value0_list = [v.value0 for v in values]
+                value1_list = [v.value1 for v in values]
+                value2_list = [v.value2 for v in values]
+                value3_list = [v.value3 for v in values]
+                sound_list = [v.sound for v in values]
+                median_values[room] = {
+                    'median_value0': np.median(value0_list) if value0_list else None,
+                    'median_value1': np.median(value1_list) if value1_list else None,
+                    'median_value2': np.median(value2_list) if value2_list else None,
+                    'median_value3': np.median(value3_list) if value3_list else None,
+                    'median_leq': calculate_leq(sound_list) if sound_list else None
+                }
+            else:
+                median_values[room] = {
+                    'median_value0': None,
+                    'median_value1': None,
+                    'median_value2': None,
+                    'median_value3': None,
+                    'median_leq': None
+                }
+
+        room1_data = SensorData.query.filter_by(room='room1').order_by(SensorData.timestamp.desc()).all()
+        room2_data = SensorData.query.filter_by(room='room2').order_by(SensorData.timestamp.desc()).all()
+
+        return render_template('index.html', room1_data=room1_data, room2_data=room2_data, median_values=median_values)
+    except Exception as e:
+        return str(e), 500
+
+@app.route('/latest', methods=['GET'])
+def latest():
+    """
+    특정 방의 최신 센서 데이터를 반환합니다.
+    URL 파라미터로 방 이름을 받아 해당 방의 가장 최근 데이터를 JSON 형식으로 반환합니다.
+    """
+    room = request.args.get('room')
+    if not room:
+        return "Room parameter is required", 400
+
+    try:
+        latest_data = SensorData.query.filter_by(room=room).order_by(SensorData.timestamp.desc()).first()
+
+        return jsonify({
+            'timestamp': latest_data.timestamp,
+            'room': latest_data.room,
+            'value0': latest_data.value0,
+            'value1': latest_data.value1,
+            'value2': latest_data.value2,
+            'value3': latest_data.value3,
+            'leq': calculate_leq([latest_data.sound])
+        })
+    except Exception as e:
+        return str(e), 500
+
+@app.route('/latest_all', methods=['GET'])
+def latest_all():
+    """
+    두 방의 최신 센서 데이터를 반환합니다.
+    각 방의 가장 최근 데이터를 JSON 형식으로 반환합니다.
+    """
+    try:
+        latest_data_room1 = SensorData.query.filter_by(room='room1').order_by(SensorData.timestamp.desc()).first()
+        latest_data_room2 = SensorData.query.filter_by(room='room2').order_by(SensorData.timestamp.desc()).first()
+
+        period_duration = 5 * 60
+        now = datetime.now()
+        period_start = now - timedelta(seconds=period_duration)
+
+        recent_data = SensorData.query.filter(SensorData.timestamp >= period_start.strftime('%Y-%m-%d %H:%M:%S')).all()
+
+        room_data = {'room1': [], 'room2': []}
+        for data in recent_data:
+            if data.room == 'room1':
+                room_data['room1'].append(data)
+            elif data.room == 'room2':
+                room_data['room2'].append(data)
+
+        median_values = {}
+        for room, values in room_data.items():
+            if values:
+                value0_list = [v.value0 for v in values]
+                value1_list = [v.value1 for v in values]
+                value2_list = [v.value2 for v in values]
+                value3_list = [v.value3 for v in values]
+                sound_list = [v.sound for v in values]
+                median_values[room] = {
+                    'median_value0': np.median(value0_list) if value0_list else None,
+                    'median_value1': np.median(value1_list) if value1_list else None,
+                    'median_value2': np.median(value2_list) if value2_list else None,
+                    'median_value3': np.median(value3_list) if value3_list else None,
+                    'median_leq': calculate_leq(sound_list) if sound_list else None
+                }
+            else:
+                median_values[room] = {
+                    'median_value0': None,
+                    'median_value1': None,
+                    'median_value2': None,
+                    'median_value3': None,
+                    'median_leq': None
+                }
+
+        response = [
+            median_values['room1']['median_value0'], median_values['room1']['median_value1'],
+            median_values['room1']['median_value2'], median_values['room1']['median_value3'],
+            latest_data_room1.value0 if latest_data_room1 else None,
+            latest_data_room1.value1 if latest_data_room1 else None,
+            latest_data_room1.value2 if latest_data_room1 else None,
+            latest_data_room1.value3 if latest_data_room1 else None,
+            calculate_leq([latest_data_room1.sound]) if latest_data_room1 else None,
+            median_values['room2']['median_value0'], median_values['room2']['median_value1'],
+            median_values['room2']['median_value2'], median_values['room2']['median_value3'],
+            latest_data_room2.value0 if latest_data_room2 else None,
+            latest_data_room2.value1 if latest_data_room2 else None,
+            latest_data_room2.value2 if latest_data_room2 else None,
+            latest_data_room2.value3 if latest_data_room2 else None,
+            calculate_leq([latest_data_room2.sound]) if latest_data_room2 else None
+        ]
+
+        return jsonify(response)
+    except Exception as e:
+        return str(e), 500
+
+@app.route('/data_by_time', methods=['GET'])
+def data_by_time():
+    """
+    특정 시간 범위 내의 센서 데이터를 반환합니다.
+    URL 파라미터로 시작 시간과 종료 시간을 받아 해당 시간 범위 내의 데이터를 JSON 형식으로 반환합니다.
+    """
+    start_time = request.args.get('start')
+    end_time = request.args.get('end')
+    if not start_time or not end_time:
+        return "Start time과 end time은 필수입니다", 400
+
+    try:
+        start_dt = datetime.strptime(start_time, '%Y-%m-%d %H:%M')
+        end_dt = datetime.strptime(end_time, '%Y-%m-%d %H:%M')
+    except ValueError:
+        return "잘못된 시간 형식. 'YYYY-MM-DD HH:MM'을 사용하세요.", 400
+
+    start_dt = start_dt.replace(second=0)
+    end_dt = end_dt.replace(second=59)
+
+    data = SensorData.query.filter(SensorData.timestamp >= start_dt, SensorData.timestamp <= end_dt).all()
+
+    result = []
+    room1_value0_list = []
+    room1_value1_list = []
+    room1_value2_list = []
+    room1_value3_list = []
+    room2_value0_list = []
+    room2_value1_list = []
+    room2_value2_list = []
+    room2_value3_list = []
+    room1_sound_list = []
+    room2_sound_list = []
+
+    for entry in data:
+        result.append([
+            entry.timestamp,
+            entry.value0,
+            entry.value1,
+            entry.value2,
+            entry.value3,
+            calculate_leq([entry.sound])  # Leq 값 계산 및 사용
+        ])
+        if entry.room == 'room1':
+            room1_value0_list.append(entry.value0)
+            room1_value1_list.append(entry.value1)
+            room1_value2_list.append(entry.value2)
+            room1_value3_list.append(entry.value3)
+            room1_sound_list.append(entry.sound)
+        elif entry.room == 'room2':
+            room2_value0_list.append(entry.value0)
+            room2_value1_list.append(entry.value1)
+            room2_value2_list.append(entry.value2)
+            room2_value3_list.append(entry.value3)
+            room2_sound_list.append(entry.sound)
+
+    # 중간값 및 Leq 값의 평균 계산
+    median_values = [
+        np.median(room1_value0_list) if room1_value0_list else None,
+        np.median(room1_value1_list) if room1_value1_list else None,
+        np.median(room1_value2_list) if room1_value2_list else None,
+        np.median(room1_value3_list) if room1_value3_list else None,
+        calculate_leq(room1_sound_list) if room1_sound_list else None,
+        np.median(room2_value0_list) if room2_value0_list else None,
+        np.median(room2_value1_list) if room2_value1_list else None,
+        np.median(room2_value2_list) if room2_value2_list else None,
+        np.median(room2_value3_list) if room2_value3_list else None,
+        calculate_leq(room2_sound_list) if room2_sound_list else None
+    ]
+
+    result.append(median_values)
+
+    return jsonify(result)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080, debug=True)
