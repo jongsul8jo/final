@@ -305,5 +305,85 @@ def data_by_time():
 
     return jsonify(result)
 
+@app.route('/aggregated_data', methods=['GET'])
+def aggregated_data():
+    """
+    두 방의 4개의 중간값, 4개의 5분 평균값 및 leq 값을 반환합니다.
+    """
+    try:
+        period_duration = 5 * 60
+        now = datetime.now()
+        period_start = now - timedelta(seconds=period_duration)
+
+        recent_data = SensorData.query.filter(SensorData.timestamp >= period_start.strftime('%Y-%m-%d %H:%M:%S')).all()
+
+        room_data = {'room1': [], 'room2': []}
+        for data in recent_data:
+            if data.room == 'room1':
+                room_data['room1'].append(data)
+            elif data.room == 'room2':
+                room_data['room2'].append(data)
+
+        median_values = {}
+        for room, values in room_data.items():
+            if values:
+                value0_list = [v.value0 for v in values]
+                value1_list = [v.value1 for v in values]
+                value2_list = [v.value2 for v in values]
+                value3_list = [v.value3 for v in values]
+                leq_list = [v.leq for v in values]
+                median_values[room] = {
+                    'median_value0': np.median(value0_list) if value0_list else None,
+                    'median_value1': np.median(value1_list) if value1_list else None,
+                    'median_value2': np.median(value2_list) if value2_list else None,
+                    'median_value3': np.median(value3_list) if value3_list else None,
+                    'mean_value0': np.mean(value0_list) if value0_list else None,
+                    'mean_value1': np.mean(value1_list) if value1_list else None,
+                    'mean_value2': np.mean(value2_list) if value2_list else None,
+                    'mean_value3': np.mean(value3_list) if value3_list else None,
+                    'median_leq': round(np.median(leq_list), 2) if leq_list else None
+                }
+            else:
+                median_values[room] = {
+                    'median_value0': None,
+                    'median_value1': None,
+                    'median_value2': None,
+                    'median_value3': None,
+                    'mean_value0': None,
+                    'mean_value1': None,
+                    'mean_value2': None,
+                    'mean_value3': None,
+                    'median_leq': None
+                }
+
+        response = [
+            median_values['room1']['median_value0'], median_values['room1']['median_value1'],
+            median_values['room1']['median_value2'], median_values['room1']['median_value3'],
+            median_values['room1']['mean_value0'], median_values['room1']['mean_value1'],
+            median_values['room1']['mean_value2'], median_values['room1']['mean_value3'],
+            median_values['room1']['median_leq'],
+            median_values['room2']['median_value0'], median_values['room2']['median_value1'],
+            median_values['room2']['median_value2'], median_values['room2']['median_value3'],
+            median_values['room2']['mean_value0'], median_values['room2']['mean_value1'],
+            median_values['room2']['mean_value2'], median_values['room2']['mean_value3'],
+            median_values['room2']['median_leq']
+        ]
+
+        return jsonify(response)
+    except Exception as e:
+        return str(e), 500
+
+def call_aggregated_data():
+    try:
+        response = requests.get("http://localhost:8080/aggregated_data")
+        print("Aggregated Data Response: ", response.json())
+    except Exception as e:
+        print("Error calling aggregated data: ", str(e))
+
+# 스케줄러 설정
+scheduler = BackgroundScheduler()
+scheduler.add_job(call_aggregated_data, 'interval', minutes=5)
+scheduler.start()
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080, debug=True)
