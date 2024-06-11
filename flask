@@ -249,7 +249,7 @@ def data_by_time():
         return "잘못된 시간 형식. 'YYYY-MM-DD HH:MM'을 사용하세요.", 400
 
     start_dt = start_dt.replace(second=0)
-    end_dt = end_dt.replace(second=59)
+    end_dt = end_dt.replace(second=0)
 
     data = SensorData.query.filter(SensorData.timestamp >= start_dt, SensorData.timestamp <= end_dt).all()
 
